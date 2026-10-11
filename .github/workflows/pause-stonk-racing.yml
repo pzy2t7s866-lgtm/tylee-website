@@ -1,0 +1,53 @@
+name: Pause Stonk Racing access
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/pause-stonk-racing.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  pause:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove public racing game and disable arcade entry
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          import zipfile
+          archive = Path("TYLEE-Render-Website.zip")
+          with zipfile.ZipFile(archive) as z:
+              entries = {i.filename: (i, z.read(i.filename)) for i in z.infolist()}
+          home = entries["index.html"][1].decode("utf-8")
+          home, count = re.subn(r'<a href="arcade/stonk-racing/" aria-label="Play TYLEE Stonk Racing">([\s\S]*?)</a>', r'<div aria-label="TYLEE Stonk Racing temporarily unavailable">\1</div>', home)
+          assert count == 1
+          home, count = re.subn(r'<a class="button" href="arcade/stonk-racing/">Play Stonk Racing</a>', '<span class="button" aria-disabled="true">Temporarily unavailable</span>', home)
+          assert count == 1
+          home = home.replace("Race the pack in TYLEE Stonk Racing or battle through Stonk City.", "TYLEE Stonk Racing is temporarily paused. Battle through Stonk City.")
+          home = home.replace("Pick your racer. Drift, boost and take the short squeeze. Chase your best time on the shared leaderboard.", "Public access to Stonk Racing is temporarily paused. Check back for updates.")
+          assert 'href="arcade/stonk-racing/' not in home
+          pause = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>TYLEE Stonk Racing · Temporarily Paused</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#fff;font:18px system-ui;text-align:center}main{padding:32px;max-width:540px}h1{color:#ef2944}a{display:inline-block;margin-top:20px;padding:14px 24px;background:#e51c35;color:#fff;border-radius:10px;text-decoration:none}</style></head><body><main><h1>TYLEE STONK RACING</h1><h2>Temporarily paused</h2><p>Public access to this game is currently paused. Check back for updates.</p><a href="/#arcade">Back to TYLEE Arcade</a></main></body></html>"""
+          temporary = archive.with_suffix(".paused.zip")
+          with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as out:
+              for name, (info, data) in entries.items():
+                  if name.startswith("arcade/stonk-racing/"):
+                      continue
+                  if name == "index.html":
+                      data = home.encode("utf-8")
+                  out.writestr(info, data)
+              out.writestr("arcade/stonk-racing/index.html", pause)
+          with zipfile.ZipFile(temporary) as z:
+              assert [n for n in z.namelist() if n.startswith("arcade/stonk-racing/")] == ["arcade/stonk-racing/index.html"]
+              assert b"<script" not in z.read("arcade/stonk-racing/index.html")
+          temporary.replace(archive)
+          print("Racing access paused; other website files preserved.")
+          
+      - name: Commit paused website package
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add TYLEE-Render-Website.zip
+          git diff --cached --quiet || git commit -m "Pause public access to TYLEE Stonk Racing"
+          git push
